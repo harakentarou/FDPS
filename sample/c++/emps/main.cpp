@@ -78,7 +78,7 @@ struct FP{
     inline static PS::F64 c = 22.0;//音速
     //inline static PS::F64 nu = 0.000001;//動粘性係数
     inline static PS::F64 grav = -9.8;
-    PS::F64 dt = 0.0005;
+    inline static PS::F64 dt = 0.0005;
     PS::S32 id;
     void copyFromForce(const Dens& dens){
 		this->dens = dens.dens;
@@ -97,6 +97,7 @@ struct FP{
 		this->pos = pos;
     }
 };
+
 struct EP{
     PS::F64vec pos;
     PS::F64vec vel;
@@ -141,10 +142,16 @@ struct CalcAcc{
 		}
    }
 };
-void first_UpPtcl(){
-	for(int i = 0; i < ;i++){
-		if( == FLD){
-			FP::vel += 
+template<typename Tptlc>
+void first_UpPtcl(Tptlc & ptcl){
+	for(int i = 0; i < N;i++){
+		if( ptcl[i].Typ == FLD){
+			ptcl[i].vel += ptcl[i].acc * FP::dt;
+			ptcl[i].pos += ptcl[i].vel * FP::dt;
+			ptcl[i].acc = 0.0;
+		}
+	}
+}
 /*void makeOutputDirectory(char* dir_name){
 	struct stat st;
 	PS::S32 ret;
@@ -202,6 +209,7 @@ int main(int argc, char *argv[]){
 	dinfo.decomposeDomainAll(emps);
 	emps.exchangeParticle(dinfo);
 	acc_tree.calcForceAllAndWriteBack(CalcAcc(), emps, dinfo);
+	first_UpPtcl(emps);
 	PS::Finalize();
 	return 0;
 }
