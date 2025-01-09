@@ -8,16 +8,20 @@
 #define FLD 0
 #define WLL 1
 #define GST -1
+#define SND 22.0
+#define DNS_FLD 1000
+#define DNS_WLL 1000
 const double PCL_DST = 0.02;//初期粒子間距離
 const double Reff = PCL_DST * 2.1; //影響半径r = 初期粒子間距離の2.1倍
 const double Reff2 = Reff*Reff;
 const double KNM_VSC = 0.000001;
 const int DIM = 3;
-double N0, LMD, A1;
-int N;
+double N0, LMD, A1, A2;
+int N;//particle_num
+double Dns[2],invDns[2];
 double calc_weight(const double dist){
     double ret = (Reff/dist - 1.0);
-    return std::max(ret, 0.0);
+   return std::max(ret, 0.0);
 }
 void Set_Para(void){
 	double tn0 = 0.0;
@@ -38,9 +42,12 @@ void Set_Para(void){
 	}}}
 	N0 = tn0;
 	LMD = tlmd / tn0;
+	Dns[FLD] = DNS_FLD;
+	Dns[WLL] = DNS_WLL;
     A1 = (2.0 * DIM * KNM_VSC) / N0 / LMD;
-	std::cout << "N0= " << N0 <<std::endl;
-	std::cout << "LMD= " << LMD << std::endl;
+    A2 = SND * SND / N0;
+	//std::cout << "N0= " << N0 <<std::endl;
+	//std::cout << "LMD= " << LMD << std::endl;
 }
 class Dens{
 	public:
@@ -65,7 +72,13 @@ class Acc{
 	acc = 0.0;
 	}
 };
-
+class Pressure{
+	public:
+	PS::F64 pres;
+	void clear(){
+		pres = 0;
+	}
+};
 // Full Particle Class
 struct FP{
 	PS::F64vec pos;
@@ -75,7 +88,7 @@ struct FP{
     PS::F64 pav;//時間平均された粒子の圧力
     PS::F64 dens;
     PS::S32 Typ;
-    inline static PS::F64 c = 22.0;//音速
+    //inline static PS::F64 c = 22.0;//音速
     //inline static PS::F64 nu = 0.000001;//動粘性係数
     inline static PS::F64 grav = -9.8;
     inline static PS::F64 dt = 0.0005;
@@ -89,6 +102,9 @@ struct FP{
     }
     void copyFromForce(const Acc& acc){
     	this->acc = acc.acc;
+    }
+    void copyFromForce(const Pressure& prs){
+    	this->pres = prs.pres;
     }
     PS::F64vec getPos() const{
 		return this->pos;
@@ -124,7 +140,7 @@ struct CalcAcc{
     void operator() (const EP* const ep_i, const PS::S32 Nip,
 		    		 const EP* const ep_j, const PS::S32 Njp,
 		    		 Acc* acc){
-		std::cout<<"A1= "<<A1<<std::endl;
+		//std::cout<<"A1= "<<A1<<std::endl;
 		for(PS::S32 i = 0 ; i < Nip ; i++){
 	    	acc[i].clear();
 	    	for(PS::S32 j = 0 ; j < Njp ; ++j){
@@ -136,9 +152,9 @@ struct CalcAcc{
 				acc[i].acc += (ep_j[j].vel - ep_i[i].vel)*w;
 	    	}
         	acc[i].acc = acc[i].acc * A1 + FP::grav;
-			if(ep_i[i].Typ == FLD){
+			/*if(ep_i[i].Typ == FLD){
         		std::cout << "acc[" << i << "] = " << acc[i].acc << std::endl;
-			}
+			}*/
 		}
    }
 };
@@ -152,6 +168,30 @@ void first_UpPtcl(Tptlc & ptcl){
 		}
 	}
 }
+struct Mkprs{
+	void operator()(const EP* const ep_i, const PS::S32 Nip,
+					const EP* const ep_j, const PS::S32 Njp,
+					Pressure* prs){
+		for(PS::S32 i = 0; i < Nip; i++){
+			prs[i].clear();
+			if(ep_i[i].Typ != GST){
+				PS::F64 ni = 0.0;
+				for(PS::S32 j = 0; j < Njp; ++j){
+					const PS::F64vec dr = ep_j[j].pos - ep_i[i].pos;
+					const double dist2 = dr * dr;
+					if(dist2 == 0.0)continue;
+					const double dist = sqrt(dist2);
+					const double w = calc_weight(dist);
+					ni += w;
+				}
+				double mi = Dns[ep_i[i].Typ];
+				double pressure = (ni > N0) * (ni - N0) * A2 * mi;
+				std::cout << "pressure[ " << i << "] = "<< pressure << std::endl;
+				prs[i].pres = pressure;
+			}
+		}
+	}
+};
 /*void makeOutputDirectory(char* dir_name){
 	struct stat st;
 	PS::S32 ret;
@@ -184,6 +224,7 @@ int main(int argc, char *argv[]){
 	PS::F64 dt, end_time;
 	PS::DomainInfo dinfo;
 	PS::TreeForForceShort<Acc, EP, EP>::Scatter acc_tree;
+	PS::TreeForForceShort<Pressure, EP, EP>::Scatter pres_tree;
 	dinfo.initialize();
 	Set_Para();
 	FILE*fp;
@@ -191,6 +232,7 @@ int main(int argc, char *argv[]){
 	fscanf(fp,"%d\n",&N);
 	emps.setNumberOfParticleLocal(N);
 	acc_tree.initialize(N);
+	pres_tree.initialize(N);
 	for(int i=0; i<N; i++){
         int a[2];
  		double b[8];
@@ -209,6 +251,7 @@ int main(int argc, char *argv[]){
 	dinfo.decomposeDomainAll(emps);
 	emps.exchangeParticle(dinfo);
 	acc_tree.calcForceAllAndWriteBack(CalcAcc(), emps, dinfo);
+	pres_tree.calcForceAllAndWriteBack(Mkprs(), emps, dinfo);
 	first_UpPtcl(emps);
 	PS::Finalize();
 	return 0;
