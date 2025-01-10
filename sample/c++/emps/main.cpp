@@ -11,12 +11,17 @@
 #define SND 22.0
 #define DNS_FLD 1000
 #define DNS_WLL 1000
-const double PCL_DST = 0.02;//初期粒子間距離
+#define PCL_DST 0.02 //初期粒子間距離
+#define DST_LMT_RAT 0.9 //これ以上の粒子の接近を許さない距離の係数
+#define COL_RAT 0.2 //接近した粒子の反発係数
 const double Reff = PCL_DST * 2.1; //影響半径r = 初期粒子間距離の2.1倍
 const double Reff2 = Reff*Reff;
 const double KNM_VSC = 0.000001;
+const double rlim = PCL_DST * DST_LMT_RAT; //初期粒子間距離の0.9倍
+const double rlim2 = rlim * rlim;
+const double COL = 1.0 + COL_RAT; //接近した粒子に対する反発係数+1.0
 const int DIM = 3;
-double N0, LMD, A1, A2;
+double N0, LMD, A1, A2, A3;
 int N;//particle_num
 double Dns[2],invDns[2];
 double calc_weight(const double dist){
@@ -44,8 +49,11 @@ void Set_Para(void){
 	LMD = tlmd / tn0;
 	Dns[FLD] = DNS_FLD;
 	Dns[WLL] = DNS_WLL;
+	invDns[FLD] = 1.0 / DNS_FLD;
+	invDns[WLL] = 1.0 / DNS_WLL;
     A1 = (2.0 * DIM * KNM_VSC) / N0 / LMD;
     A2 = SND * SND / N0;
+    A3 = -DIM / N0;
 	//std::cout << "N0= " << N0 <<std::endl;
 	//std::cout << "LMD= " << LMD << std::endl;
 }
@@ -75,6 +83,8 @@ class Acc{
 class Pressure{
 	public:
 	PS::F64 pres;
+	PS::F64vec acc;
+	PS::F64vec vel;
 	void clear(){
 		pres = 0;
 	}
@@ -105,6 +115,8 @@ struct FP{
     }
     void copyFromForce(const Pressure& prs){
     	this->pres = prs.pres;
+    	this->acc = prs.acc;
+    	this->vel = prs.vel;
     }
     PS::F64vec getPos() const{
 		return this->pos;
@@ -118,6 +130,7 @@ struct EP{
     PS::F64vec pos;
     PS::F64vec vel;
     PS::F64 dt;
+    PS::F64 pres;
     PS::S32 Typ;
     static double cof;
     void copyFromFP(const FP& rp){
@@ -125,6 +138,7 @@ struct EP{
 		this->vel = rp.vel;
 		this->dt = rp.dt;
 		this->Typ = rp.Typ;
+		this->pres = rp.pres;
     }
     PS::F64vec getPos() const{
 		return this->pos;
@@ -141,9 +155,9 @@ struct CalcAcc{
 		    		 const EP* const ep_j, const PS::S32 Njp,
 		    		 Acc* acc){
 		//std::cout<<"A1= "<<A1<<std::endl;
-		for(PS::S32 i = 0 ; i < Nip ; i++){
+		for(PS::S32 i = 0; i < Nip; i++){
 	    	acc[i].clear();
-	    	for(PS::S32 j = 0 ; j < Njp ; ++j){
+	    	for(PS::S32 j = 0; j < Njp; ++j){
 	    		const PS::F64vec dr = ep_j[j].pos - ep_i[i].pos;
         		const double dist2 = dr*dr;
         		if(dist2 == 0.0) continue;
@@ -158,13 +172,14 @@ struct CalcAcc{
 		}
    }
 };
-template<typename Tptlc>
-void first_UpPtcl(Tptlc & ptcl){
+template<typename Tptcl>
+void first_UpPtcl(Tptcl & ptcl){
 	for(int i = 0; i < N;i++){
 		if( ptcl[i].Typ == FLD){
 			ptcl[i].vel += ptcl[i].acc * FP::dt;
 			ptcl[i].pos += ptcl[i].vel * FP::dt;
 			ptcl[i].acc = 0.0;
+			//ChkPcl(i);
 		}
 	}
 }
@@ -175,6 +190,8 @@ struct Mkprs{
 		for(PS::S32 i = 0; i < Nip; i++){
 			prs[i].clear();
 			if(ep_i[i].Typ != GST){
+				double mi = Dns[ep_i[i].Typ];
+				PS::F64vec vec_i = ep_i[i].vel;
 				PS::F64 ni = 0.0;
 				for(PS::S32 j = 0; j < Njp; ++j){
 					const PS::F64vec dr = ep_j[j].pos - ep_i[i].pos;
@@ -183,15 +200,72 @@ struct Mkprs{
 					const double dist = sqrt(dist2);
 					const double w = calc_weight(dist);
 					ni += w;
+					if(ep_i[i].Typ == FLD && dist2 < rlim){
+						if(j != i && ep_j[j].Typ != GST){
+							double fDT = (ep_i[i].vel - ep_j[j].vel) * dr;
+							if(fDT > 0.0){
+								const double mj = Dns[ep_j[j].Typ];
+								fDT *= COL * mj / (mi + mj) / dist2;
+								vec_i -= dr * fDT;
+							}
+						}
+					}
 				}
-				double mi = Dns[ep_i[i].Typ];
+				prs[i].acc = vec_i;
 				double pressure = (ni > N0) * (ni - N0) * A2 * mi;
-				std::cout << "pressure[ " << i << "] = "<< pressure << std::endl;
+				//std::cout << "pressure[" << i << "] = "<< pressure << std::endl;
 				prs[i].pres = pressure;
+			}
+		}
+		for(PS::S32 i = 0; i < Nip; i++){
+			prs[i].vel = prs[i].acc;
+		}
+	}
+};
+struct PrsGrdTrm{
+	void operator()(const EP* const ep_i, const PS::S32 Nip,
+					const EP* const ep_j, const PS::S32 Njp,
+					Acc* acc){
+		for(PS::S32 i = 0; i < Nip; i++){
+			if(ep_i[i].Typ == FLD){
+				acc[i].clear();
+				double pres_min = ep_i[i].pres;
+				for(PS::S32 j = 0; j < Njp; j++){
+					const PS::F64vec dr = ep_j[j].pos - ep_i[i].pos;
+					const double dist2 = dr * dr;
+					if(dist2 == 0.0)continue;
+					if(j != i && ep_j[j].Typ != GST){
+						if(pres_min > ep_j[j].pres)pres_min = ep_j[j].pres;
+					}
+				}
+				for(PS::S32 j = 0; j < Njp; j++){
+					const PS::F64vec dr = ep_j[j].pos - ep_i[i].pos;
+					const double dist2 = dr * dr;
+					if(dist2 == 0.0)continue;
+					if(j != i && ep_j[j].Typ != GST){
+						const double dist = sqrt(dist2);
+						double w = calc_weight(dist);
+						w *= (ep_j[j].pres - pres_min)/dist2;
+						acc[i].acc += dr * w;
+					}
+				}
+				acc[i].acc = acc[i].acc * invDns[FLD] * A3;
+				std::cout << "acc[" << i << "]= "<< acc[i].acc << std::endl;
 			}
 		}
 	}
 };
+template<typename Tptcl>
+void second_UpPtcl(Tptcl & ptcl){
+	for(int i = 0; i < N; i++){
+		if(ptcl[i].Typ == FLD){
+			ptcl[i].vel += ptcl[i].acc * FP::dt;
+			ptcl[i].pos += ptcl[i].acc * FP::dt * FP::dt;
+			ptcl[i].acc = 0.0;
+			//ChkPcl(i);
+		}
+	}
+}
 /*void makeOutputDirectory(char* dir_name){
 	struct stat st;
 	PS::S32 ret;
@@ -251,8 +325,10 @@ int main(int argc, char *argv[]){
 	dinfo.decomposeDomainAll(emps);
 	emps.exchangeParticle(dinfo);
 	acc_tree.calcForceAllAndWriteBack(CalcAcc(), emps, dinfo);
-	pres_tree.calcForceAllAndWriteBack(Mkprs(), emps, dinfo);
 	first_UpPtcl(emps);
+	pres_tree.calcForceAllAndWriteBack(Mkprs(), emps, dinfo);
+	acc_tree.calcForceAllAndWriteBack(PrsGrdTrm(), emps, dinfo);
+	second_UpPtcl(emps);
 	PS::Finalize();
 	return 0;
 }
