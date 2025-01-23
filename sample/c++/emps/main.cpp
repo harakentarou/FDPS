@@ -14,6 +14,10 @@
 #define PCL_DST 0.02 //初期粒子間距離
 #define DST_LMT_RAT 0.9 //これ以上の粒子の接近を許さない距離の係数
 #define COL_RAT 0.2 //接近した粒子の反発係数
+#define MIN (0.0 - PCL_DST * 3)
+#define MAX_X (1.0 + PCL_DST * 3)
+#define MAX_Y (0.2 + PCL_DST * 3)
+#define MAX_Z (0.6 + PCL_DST * 30)
 const double Reff = PCL_DST * 2.1; //影響半径r = 初期粒子間距離の2.1倍
 const double Reff2 = Reff*Reff;
 const double KNM_VSC = 0.000001;
@@ -25,7 +29,7 @@ double N0, LMD, A1, A2, A3;
 int N;//particle_num
 double Dns[2],invDns[2];
 double calc_weight(const double dist){
-    double ret = (Reff/dist - 1.0);
+    double ret = ((Reff/dist) - 1.0);
    return std::max(ret, 0.0);
 }
 void Set_Para(void){
@@ -103,25 +107,25 @@ struct FP{
     inline static PS::F64 grav = -9.8;
     inline static PS::F64 dt = 0.0005;
     PS::S32 id;
-    void copyFromForce(const Dens& dens){
+	void copyFromForce(const Dens& dens){
 		this->dens = dens.dens;
     }
-    void copyFromForce(const Hydro& force){
+	void copyFromForce(const Hydro& force){
 		this->acc = force.acc;
 		this->dt = force.dt;
     }
-    void copyFromForce(const Acc& acc){
+	void copyFromForce(const Acc& acc){
     	this->acc = acc.acc;
     }
-    void copyFromForce(const Pressure& prs){
+	void copyFromForce(const Pressure& prs){
     	this->pres = prs.pres;
     	this->acc = prs.acc;
     	this->vel = prs.vel;
     }
-    PS::F64vec getPos() const{
+	PS::F64vec getPos() const{
 		return this->pos;
     }
-    void setPos(const PS::F64vec& pos){
+	void setPos(const PS::F64vec& pos){
 		this->pos = pos;
     }
 };
@@ -154,24 +158,34 @@ struct CalcAcc{
     void operator() (const EP* const ep_i, const PS::S32 Nip,
 		    		 const EP* const ep_j, const PS::S32 Njp,
 		    		 Acc* acc){
-		//std::cout<<"A1= "<<A1<<std::endl;
 		for(PS::S32 i = 0; i < Nip; i++){
-	    	acc[i].clear();
+			acc[i].clear();
+			if(ep_i[i].Typ == FLD){
 	    	for(PS::S32 j = 0; j < Njp; ++j){
 	    		const PS::F64vec dr = ep_j[j].pos - ep_i[i].pos;
         		const double dist2 = dr*dr;
-        		if(dist2 == 0.0) continue;
-				const double dist = sqrt( dist2 );
-        		const double w = calc_weight(dist);
-				acc[i].acc += (ep_j[j].vel - ep_i[i].vel)*w;
-	    	}
-        	acc[i].acc = acc[i].acc * A1 + FP::grav;
-			/*if(ep_i[i].Typ == FLD){
-        		std::cout << "acc[" << i << "] = " << acc[i].acc << std::endl;
-			}*/
+        		//std::cout << "dist2= " << dist2 << std::endl;
+				if(dist2 == 0.0 || dist2 > Reff2)continue;
+   	    		if(i != j && ep_j[j].Typ != GST){
+					const double dist = sqrt( dist2 );
+        			const double w = calc_weight(dist);
+					acc[i].acc += (ep_j[j].vel - ep_i[i].vel)*w;
+				}
+	    	}//forループ抜け
+        	acc[i].acc = acc[i].acc * A1; //+ FP::grav;
+        	}
 		}
    }
 };
+template<typename Tpi>
+void ChkPcl(Tpi & pi){
+	if(pi.pos.x > MAX_X || pi.pos.x < MIN || pi.pos.y > MAX_Y || pi.pos.y < MIN || pi.pos.z > MAX_Z || pi.pos.z < MIN){
+		pi.Typ = GST;
+		pi.pres = 0.0;
+		pi.vel = 0.0;
+		std::cout << "ChkPcl is success" << std::endl;
+	}
+}
 template<typename Tptcl>
 void first_UpPtcl(Tptcl & ptcl){
 	for(int i = 0; i < N;i++){
@@ -179,7 +193,7 @@ void first_UpPtcl(Tptcl & ptcl){
 			ptcl[i].vel += ptcl[i].acc * FP::dt;
 			ptcl[i].pos += ptcl[i].vel * FP::dt;
 			ptcl[i].acc = 0.0;
-			//ChkPcl(i);
+			ChkPcl(ptcl[i]);
 		}
 	}
 }
@@ -196,7 +210,7 @@ struct Mkprs{
 				for(PS::S32 j = 0; j < Njp; ++j){
 					const PS::F64vec dr = ep_j[j].pos - ep_i[i].pos;
 					const double dist2 = dr * dr;
-					if(dist2 == 0.0)continue;
+					if(dist2 == 0.0 || dist2 > Reff2)continue;
 					const double dist = sqrt(dist2);
 					const double w = calc_weight(dist);
 					ni += w;
@@ -213,7 +227,7 @@ struct Mkprs{
 				}
 				prs[i].acc = vec_i;
 				double pressure = (ni > N0) * (ni - N0) * A2 * mi;
-				//std::cout << "pressure[" << i << "] = "<< pressure << std::endl;
+				std::cout << "pressure[" << i << "] = "<< pressure << std::endl;
 				prs[i].pres = pressure;
 			}
 		}
@@ -233,7 +247,7 @@ struct PrsGrdTrm{
 				for(PS::S32 j = 0; j < Njp; j++){
 					const PS::F64vec dr = ep_j[j].pos - ep_i[i].pos;
 					const double dist2 = dr * dr;
-					if(dist2 == 0.0)continue;
+					if(dist2 == 0.0 || dist2 > Reff2)continue;
 					if(j != i && ep_j[j].Typ != GST){
 						if(pres_min > ep_j[j].pres)pres_min = ep_j[j].pres;
 					}
@@ -241,7 +255,7 @@ struct PrsGrdTrm{
 				for(PS::S32 j = 0; j < Njp; j++){
 					const PS::F64vec dr = ep_j[j].pos - ep_i[i].pos;
 					const double dist2 = dr * dr;
-					if(dist2 == 0.0)continue;
+					if(dist2 == 0.0 || dist2 > Reff2)continue;
 					if(j != i && ep_j[j].Typ != GST){
 						const double dist = sqrt(dist2);
 						double w = calc_weight(dist);
@@ -250,7 +264,7 @@ struct PrsGrdTrm{
 					}
 				}
 				acc[i].acc = acc[i].acc * invDns[FLD] * A3;
-				std::cout << "acc[" << i << "]= "<< acc[i].acc << std::endl;
+				//std::cout << "acc[" << i << "]= "<< acc[i].acc << std::endl;
 			}
 		}
 	}
@@ -262,7 +276,7 @@ void second_UpPtcl(Tptcl & ptcl){
 			ptcl[i].vel += ptcl[i].acc * FP::dt;
 			ptcl[i].pos += ptcl[i].acc * FP::dt * FP::dt;
 			ptcl[i].acc = 0.0;
-			//ChkPcl(i);
+			ChkPcl(ptcl[i]);
 		}
 	}
 }
@@ -322,13 +336,23 @@ int main(int argc, char *argv[]){
         emps[i].pres = b[6];
         emps[i].pav = b[7];
 	}
+	fclose(fp);
 	dinfo.decomposeDomainAll(emps);
 	emps.exchangeParticle(dinfo);
+	fp = fopen("result/result.csv","w");
 	acc_tree.calcForceAllAndWriteBack(CalcAcc(), emps, dinfo);
+	for(int i = 0; i<N; i++){
+		if(emps[i].Typ == FLD)emps[i].acc.z = emps[i].acc.z + FP::grav;
+	}
 	first_UpPtcl(emps);
 	pres_tree.calcForceAllAndWriteBack(Mkprs(), emps, dinfo);
 	acc_tree.calcForceAllAndWriteBack(PrsGrdTrm(), emps, dinfo);
 	second_UpPtcl(emps);
+	pres_tree.calcForceAllAndWriteBack(Mkprs(), emps, dinfo);
+	for(int i=0; i<N; i++){
+		fprintf(fp, "%d,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf\n",emps[i].Typ,emps[i].pos.x,emps[i].pos.y,emps[i].pos.z,emps[i].vel.x,emps[i].vel.y,emps[i].vel.z,emps[i].acc.x,emps[i].acc.y,emps[i].acc.z,emps[i].pres);
+	}
+	fclose(fp);
 	PS::Finalize();
 	return 0;
 }
