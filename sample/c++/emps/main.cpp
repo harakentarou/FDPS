@@ -18,8 +18,8 @@
 #define MAX_X (1.0 + PCL_DST * 3)
 #define MAX_Y (0.2 + PCL_DST * 3)
 #define MAX_Z (0.6 + PCL_DST * 30)
-#define END_TIM 0.005 //終了時刻
-#define OPT_FQC 1 //出力間隔を決める反復数
+#define END_TIM 1.0 //終了時刻
+#define OPT_FQC 100 //出力間隔を決める反復数
 #define DIM 3
 const double Reff = PCL_DST * 2.1; //影響半径r = 初期粒子間距離の2.1倍
 const double Reff2 = Reff*Reff;
@@ -63,7 +63,7 @@ void Set_Para(void){
     A1 = (2.0 * DIM * KNM_VSC) / N0 / LMD;
     A2 = SND * SND / N0;
     A3 = -DIM / N0;
-    std::cout<<"A1="<<A1<<"A2="<<A2<<"A3="<<A3<<std::endl;
+    //std::cout<<"A1="<<A1<<"A2="<<A2<<"A3="<<A3<<std::endl;
     iF = 0;
     iLP = 0;
 	//std::cout << "N0= " << N0 <<std::endl;
@@ -237,7 +237,7 @@ struct Mkprs{
 					const double dist = sqrt(dist2);
 					const double w = calc_weight(dist);
 					ni += w;
-					if(ep_i[i].Typ == FLD && dist2 < rlim){
+					if(ep_i[i].Typ == FLD && dist2 < rlim2){
 						if(j != i && ep_j[j].Typ != GST){
 							double fDT = (ep_i[i].vel - ep_j[j].vel) * dr;
 							if(fDT > 0.0){
@@ -333,14 +333,22 @@ int main(int argc, char *argv[]){
 		emps[i].pav = b[7];
 	}
 	fclose(fp);
-	fp = fopen("result/result.csv","w");
-	for(PS::F64 time = 0.0; time < END_TIM; time += FP::dt){
+	for(PS::F64 time = 0.0; time <= END_TIM; time += FP::dt){
 		if(iLP%OPT_FQC == 0){
+			std::cout<<"file maked"<<std::endl;
 			WrtDat(emps);
 		}
 		dinfo.decomposeDomainAll(emps);
 		emps.exchangeParticle(dinfo);
 		acc_tree.calcForceAllAndWriteBack(CalcAcc(), emps, dinfo);
+		if(time == 0.0){
+			fp = fopen("result/result.csv","w");
+			std::cout<<"time="<<time<<std::endl;
+			for(int i = 0; i<N; i++){
+				fprintf(fp, "%d,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf\n",emps[i].Typ,emps[i].pos.x,emps[i].pos.y,emps[i].pos.z,emps[i].vel.x,emps[i].vel.y,emps[i].vel.z,emps[i].acc.x,emps[i].acc.y,emps[i].acc.z,emps[i].pres);
+			}
+			fclose(fp);
+		}
 		first_UpPtcl(emps);
 		pres_tree.calcForceAllAndWriteBack(Mkprs(), emps, dinfo);
 		acc_tree.calcForceAllAndWriteBack(PrsGrdTrm(), emps, dinfo);
@@ -351,11 +359,8 @@ int main(int argc, char *argv[]){
 		}
 		iLP++;
 	}
-	for(int i=0; i<N; i++){
-		fprintf(fp, "%d,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf\n",emps[i].Typ,emps[i].pos.x,emps[i].pos.y,emps[i].pos.z,emps[i].vel.x,emps[i].vel.y,emps[i].vel.z,emps[i].acc.x,emps[i].acc.y,emps[i].acc.z,emps[i].pres);
-	}
-	fclose(fp);
-	std::cout<<"ChkPcl="<<count<<std::endl;
+	//std::cout<<"ChkPcl="<<count<<std::endl;
+	std::cout<<"success"<<std::endl;
 	PS::Finalize();
 	return 0;
 }
