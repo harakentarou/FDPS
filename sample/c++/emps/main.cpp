@@ -18,15 +18,20 @@
 #define MAX_X (1.0 + PCL_DST * 3)
 #define MAX_Y (0.2 + PCL_DST * 3)
 #define MAX_Z (0.6 + PCL_DST * 30)
+#define END_TIM 0.005 //終了時刻
+#define OPT_FQC 1 //出力間隔を決める反復数
+#define DIM 3
 const double Reff = PCL_DST * 2.1; //影響半径r = 初期粒子間距離の2.1倍
 const double Reff2 = Reff*Reff;
 const double KNM_VSC = 0.000001;
 const double rlim = PCL_DST * DST_LMT_RAT; //初期粒子間距離の0.9倍
 const double rlim2 = rlim * rlim;
 const double COL = 1.0 + COL_RAT; //接近した粒子に対する反発係数+1.0
-const int DIM = 3;
 double N0, LMD, A1, A2, A3;
 int N;//particle_num
+int iF,iLP;//ファイル番号,反復数
+int count=0;
+FILE*fp;
 double Dns[2],invDns[2];
 double calc_weight(const double dist){
     double ret = ((Reff/dist) - 1.0);
@@ -58,8 +63,23 @@ void Set_Para(void){
     A1 = (2.0 * DIM * KNM_VSC) / N0 / LMD;
     A2 = SND * SND / N0;
     A3 = -DIM / N0;
+    std::cout<<"A1="<<A1<<"A2="<<A2<<"A3="<<A3<<std::endl;
+    iF = 0;
+    iLP = 0;
 	//std::cout << "N0= " << N0 <<std::endl;
 	//std::cout << "LMD= " << LMD << std::endl;
+}
+template<typename Tptcl>
+void WrtDat(Tptcl &emps){
+	char output_filename[256];
+	sprintf(output_filename,"output%05d.prof",iF);
+	fp = fopen(output_filename,"w");
+	fprintf(fp,"%d\n",N);
+	for(int i=0;i<N;i++){
+		fprintf(fp," %d %d %lf %lf %lf %lf %lf %lf %lf %lf\n",emps[i].id,emps[i].Typ,emps[i].pos.x,emps[i].pos.y,emps[i].pos.z,emps[i].vel.x,emps[i].vel.y,emps[i].vel.z,emps[i].pres,emps[i].pav/OPT_FQC);
+	}
+	fclose(fp);
+	iF++;
 }
 class Dens{
 	public:
@@ -90,7 +110,7 @@ class Pressure{
 	PS::F64vec acc;
 	PS::F64vec vel;
 	void clear(){
-		pres = 0;
+		pres = 0.0;
 	}
 };
 // Full Particle Class
@@ -165,14 +185,15 @@ struct CalcAcc{
 	    		const PS::F64vec dr = ep_j[j].pos - ep_i[i].pos;
         		const double dist2 = dr*dr;
         		//std::cout << "dist2= " << dist2 << std::endl;
-				if(dist2 == 0.0 || dist2 > Reff2)continue;
+				if(dist2 == 0.0 || dist2 >= Reff2)continue;
    	    		if(i != j && ep_j[j].Typ != GST){
 					const double dist = sqrt( dist2 );
         			const double w = calc_weight(dist);
 					acc[i].acc += (ep_j[j].vel - ep_i[i].vel)*w;
 				}
 	    	}//forループ抜け
-        	acc[i].acc = acc[i].acc * A1; //+ FP::grav;
+        	acc[i].acc = acc[i].acc * A1;
+        	acc[i].acc.z = acc[i].acc.z + FP::grav;
         	}
 		}
    }
@@ -183,7 +204,8 @@ void ChkPcl(Tpi & pi){
 		pi.Typ = GST;
 		pi.pres = 0.0;
 		pi.vel = 0.0;
-		std::cout << "ChkPcl is success" << std::endl;
+		//std::cout << "ChkPcl is success" << std::endl;
+		count++;
 	}
 }
 template<typename Tptcl>
@@ -206,6 +228,7 @@ struct Mkprs{
 			if(ep_i[i].Typ != GST){
 				double mi = Dns[ep_i[i].Typ];
 				PS::F64vec vec_i = ep_i[i].vel;
+				PS::F64vec vec_i2 = ep_i[i].vel;
 				PS::F64 ni = 0.0;
 				for(PS::S32 j = 0; j < Njp; ++j){
 					const PS::F64vec dr = ep_j[j].pos - ep_i[i].pos;
@@ -227,7 +250,7 @@ struct Mkprs{
 				}
 				prs[i].acc = vec_i;
 				double pressure = (ni > N0) * (ni - N0) * A2 * mi;
-				std::cout << "pressure[" << i << "] = "<< pressure << std::endl;
+				//std::cout << "pressure[" << i << "] = "<< pressure << std::endl;
 				prs[i].pres = pressure;
 			}
 		}
@@ -280,42 +303,15 @@ void second_UpPtcl(Tptcl & ptcl){
 		}
 	}
 }
-/*void makeOutputDirectory(char* dir_name){
-	struct stat st;
-	PS::S32 ret;
-	if(PS::Comm::getRank() == 0){
-		if(stat(dir_name, &st) != 0){
-			ret = mkdir(dir_name, 0777);
-		}
-		else{
-			ret = 0;
-		}
-	}
-	PS::Comm::broadcast(&ret, 1);
-	if(ret == 0){
-		if(PS::Comm::getRank() == 0)
-			fprintf(stderr, "Directory \"%s\" is successfully made.\n", dir_name);
-	}
-	else{
-		if(PS::Comm::getRank() == 0)
-			fprintf(stderr, "Directory %s is fails to be made.\n", dir_name);
-		PS::Abort();
-	}
-}*/
 int main(int argc, char *argv[]){
 	PS::Initialize(argc, argv);
-	/*char dir_name[1024];
-	sprintf(dir_name,"./result");
-	makeOutputDirectry(dir_name);*/
 	PS::ParticleSystem<FP> emps;
 	emps.initialize();
-	PS::F64 dt, end_time;
 	PS::DomainInfo dinfo;
 	PS::TreeForForceShort<Acc, EP, EP>::Scatter acc_tree;
 	PS::TreeForForceShort<Pressure, EP, EP>::Scatter pres_tree;
 	dinfo.initialize();
 	Set_Para();
-	FILE*fp;
 	fp = fopen(IN_FILE,"r");
 	fscanf(fp,"%d\n",&N);
 	emps.setNumberOfParticleLocal(N);
@@ -334,25 +330,32 @@ int main(int argc, char *argv[]){
         emps[i].vel.y = b[4];
         emps[i].vel.z = b[5];
         emps[i].pres = b[6];
-        emps[i].pav = b[7];
+		emps[i].pav = b[7];
 	}
 	fclose(fp);
-	dinfo.decomposeDomainAll(emps);
-	emps.exchangeParticle(dinfo);
 	fp = fopen("result/result.csv","w");
-	acc_tree.calcForceAllAndWriteBack(CalcAcc(), emps, dinfo);
-	for(int i = 0; i<N; i++){
-		if(emps[i].Typ == FLD)emps[i].acc.z = emps[i].acc.z + FP::grav;
+	for(PS::F64 time = 0.0; time < END_TIM; time += FP::dt){
+		if(iLP%OPT_FQC == 0){
+			WrtDat(emps);
+		}
+		dinfo.decomposeDomainAll(emps);
+		emps.exchangeParticle(dinfo);
+		acc_tree.calcForceAllAndWriteBack(CalcAcc(), emps, dinfo);
+		first_UpPtcl(emps);
+		pres_tree.calcForceAllAndWriteBack(Mkprs(), emps, dinfo);
+		acc_tree.calcForceAllAndWriteBack(PrsGrdTrm(), emps, dinfo);
+		second_UpPtcl(emps);
+		pres_tree.calcForceAllAndWriteBack(Mkprs(), emps, dinfo);
+		for(int i=0;i<N;i++){
+			emps[i].pav += emps[i].pres;
+		}
+		iLP++;
 	}
-	first_UpPtcl(emps);
-	pres_tree.calcForceAllAndWriteBack(Mkprs(), emps, dinfo);
-	acc_tree.calcForceAllAndWriteBack(PrsGrdTrm(), emps, dinfo);
-	second_UpPtcl(emps);
-	pres_tree.calcForceAllAndWriteBack(Mkprs(), emps, dinfo);
 	for(int i=0; i<N; i++){
 		fprintf(fp, "%d,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf\n",emps[i].Typ,emps[i].pos.x,emps[i].pos.y,emps[i].pos.z,emps[i].vel.x,emps[i].vel.y,emps[i].vel.z,emps[i].acc.x,emps[i].acc.y,emps[i].acc.z,emps[i].pres);
 	}
 	fclose(fp);
+	std::cout<<"ChkPcl="<<count<<std::endl;
 	PS::Finalize();
 	return 0;
 }

@@ -3,7 +3,7 @@
 #include <math.h>
 #include <string.h>
 #include <iostream>//check
-#define IN_FILE "../mk_particle/dambreak.prof"
+#define IN_FILE "../../mk_particle/dambreak.prof"
 #define PCL_DST 0.02					//平均粒子間距離
 #define MIN_X  (0.0 - PCL_DST*3)	//解析領域のx方向の最小値
 #define MIN_Y  (0.0 - PCL_DST*3)	//解析領域のy方向の最小値
@@ -374,7 +374,6 @@ void UpPcl2(void){
 }
 
 void ClcEMPS(void){
-	/*int count = 0;
 	while(1){
 		if(iLP%100==0){
 			int p_num=0;
@@ -384,8 +383,8 @@ void ClcEMPS(void){
 		if(iLP%OPT_FQC == 0 ){
 			WrtDat();
 			if(TIM >= FIN_TIM ){break;}
-		}*/
-		fp = fopen("../../FDPS/sample/c++/emps/result/EMPS_result.csv","w");
+		}
+		//fp = fopen("../../FDPS/sample/c++/emps/result/EMPS_result.csv","w");
 		MkBkt();
 		VscTrm();
 		UpPcl1();
@@ -394,14 +393,14 @@ void ClcEMPS(void){
 		PrsGrdTrm();
 		UpPcl2();
 		MkPrs();
-		for(int j = 0; j<nP; j++){
+		/*for(int j = 0; j<nP; j++){
 			fprintf(fp, "%d,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf\n",Typ[j],Pos[j*3],Pos[j*3 +1],Pos[j*3 +2],Vel[j*3],Vel[j*3 +1],Vel[j*3 +2],Acc[j*3],Acc[j*3+1],Acc[j*3+2],Prs[j]);
 		}
-		fclose(fp);
-		/*for(int i=0;i<nP;i++){pav[i] += Prs[i];}
+		fclose(fp);*/
+		for(int i=0;i<nP;i++){pav[i] += Prs[i];}
 		iLP++;
 		TIM += DT;
-	}*/
+	}
 }
 #include <sys/time.h>
 double get_dtime(void){
