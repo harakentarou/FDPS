@@ -4,6 +4,7 @@
 #include <iostream>
 #include <vector>
 #include <sys/stat.h>
+#include <time.h>
 #define IN_FILE "../mk_particle/dambreak.prof"
 #define FLD 0
 #define WLL 1
@@ -63,11 +64,8 @@ void Set_Para(void){
     A1 = (2.0 * DIM * KNM_VSC) / N0 / LMD;
     A2 = SND * SND / N0;
     A3 = -DIM / N0;
-    //std::cout<<"A1="<<A1<<"A2="<<A2<<"A3="<<A3<<std::endl;
     iF = 0;
     iLP = 0;
-	//std::cout << "N0= " << N0 <<std::endl;
-	//std::cout << "LMD= " << LMD << std::endl;
 }
 template<typename Tptcl>
 void WrtDat(Tptcl &emps){
@@ -81,22 +79,6 @@ void WrtDat(Tptcl &emps){
 	fclose(fp);
 	iF++;
 }
-class Dens{
-	public:
-	PS::F64 dens;
-	void clear(){
-		dens = 0;
-	}
-};
-class Hydro{
-	public:
-	PS::F64vec acc;
-	PS::F64 dt;
-	void clear(){
-		acc = 0;
-		dt = 0;
-	}
-};
 class Acc{
     public:
     PS::F64vec acc;
@@ -122,18 +104,9 @@ struct FP{
     PS::F64 pav;//時間平均された粒子の圧力
     PS::F64 dens;
     PS::S32 Typ;
-    //inline static PS::F64 c = 22.0;//音速
-    //inline static PS::F64 nu = 0.000001;//動粘性係数
     inline static PS::F64 grav = -9.8;
     inline static PS::F64 dt = 0.0005;
     PS::S32 id;
-	void copyFromForce(const Dens& dens){
-		this->dens = dens.dens;
-    }
-	void copyFromForce(const Hydro& force){
-		this->acc = force.acc;
-		this->dt = force.dt;
-    }
 	void copyFromForce(const Acc& acc){
     	this->acc = acc.acc;
     }
@@ -184,7 +157,6 @@ struct CalcAcc{
 	    	for(PS::S32 j = 0; j < Njp; ++j){
 	    		const PS::F64vec dr = ep_j[j].pos - ep_i[i].pos;
         		const double dist2 = dr*dr;
-        		//std::cout << "dist2= " << dist2 << std::endl;
 				if(dist2 == 0.0 || dist2 >= Reff2)continue;
    	    		if(i != j && ep_j[j].Typ != GST){
 					const double dist = sqrt( dist2 );
@@ -204,8 +176,6 @@ void ChkPcl(Tpi & pi){
 		pi.Typ = GST;
 		pi.pres = 0.0;
 		pi.vel = 0.0;
-		//std::cout << "ChkPcl is success" << std::endl;
-		count++;
 	}
 }
 template<typename Tptcl>
@@ -250,7 +220,6 @@ struct Mkprs{
 				}
 				prs[i].acc = vec_i;
 				double pressure = (ni > N0) * (ni - N0) * A2 * mi;
-				//std::cout << "pressure[" << i << "] = "<< pressure << std::endl;
 				prs[i].pres = pressure;
 			}
 		}
@@ -287,7 +256,6 @@ struct PrsGrdTrm{
 					}
 				}
 				acc[i].acc = acc[i].acc * invDns[FLD] * A3;
-				//std::cout << "acc[" << i << "]= "<< acc[i].acc << std::endl;
 			}
 		}
 	}
@@ -333,22 +301,17 @@ int main(int argc, char *argv[]){
 		emps[i].pav = b[7];
 	}
 	fclose(fp);
-	for(PS::F64 time = 0.0; time <= END_TIM; time += FP::dt){
+	PS::F64 time = 0.0;
+	clock_t start = clock();
+	while(1){
 		if(iLP%OPT_FQC == 0){
-			std::cout<<"file maked"<<std::endl;
+			std::cout<<"file made"<<std::endl;
 			WrtDat(emps);
+			if(time >= END_TIM)break;
 		}
 		dinfo.decomposeDomainAll(emps);
 		emps.exchangeParticle(dinfo);
 		acc_tree.calcForceAllAndWriteBack(CalcAcc(), emps, dinfo);
-		if(time == 0.0){
-			fp = fopen("result/result.csv","w");
-			std::cout<<"time="<<time<<std::endl;
-			for(int i = 0; i<N; i++){
-				fprintf(fp, "%d,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf\n",emps[i].Typ,emps[i].pos.x,emps[i].pos.y,emps[i].pos.z,emps[i].vel.x,emps[i].vel.y,emps[i].vel.z,emps[i].acc.x,emps[i].acc.y,emps[i].acc.z,emps[i].pres);
-			}
-			fclose(fp);
-		}
 		first_UpPtcl(emps);
 		pres_tree.calcForceAllAndWriteBack(Mkprs(), emps, dinfo);
 		acc_tree.calcForceAllAndWriteBack(PrsGrdTrm(), emps, dinfo);
@@ -358,9 +321,16 @@ int main(int argc, char *argv[]){
 			emps[i].pav += emps[i].pres;
 		}
 		iLP++;
+		time += FP::dt;
 	}
-	//std::cout<<"ChkPcl="<<count<<std::endl;
-	std::cout<<"success"<<std::endl;
+	clock_t end = clock();
+	const double system_time = static_cast<double>(end-start)/CLOCKS_PER_SEC;
+	std::cout<<"Total		: "<< system_time <<" sec\n"<<std::endl;
+	fp = fopen("result/result.csv","w");
+	for(int i=0;i<N;i++){
+		fprintf(fp, "%d,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf\n",emps[i].Typ,emps[i].pos.x,emps[i].pos.y,emps[i].pos.z,emps[i].vel.x,emps[i].vel.y,emps[i].vel.z,emps[i].acc.x,emps[i].acc.y,emps[i].acc.z,emps[i].pres);
+	}
+	fclose(fp);
 	PS::Finalize();
 	return 0;
 }
