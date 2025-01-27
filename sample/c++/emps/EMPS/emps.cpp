@@ -3,7 +3,7 @@
 #include <math.h>
 #include <string.h>
 #include <iostream>//check
-#define IN_FILE "../../mk_particle/dambreak.prof"
+#define IN_FILE "../mk_particle/dambreak.prof"
 #define PCL_DST 0.02					//平均粒子間距離
 #define MIN_X  (0.0 - PCL_DST*3)	//解析領域のx方向の最小値
 #define MIN_Y  (0.0 - PCL_DST*3)	//解析領域のy方向の最小値
@@ -11,7 +11,6 @@
 #define MAX_X  (1.0 + PCL_DST*3)	//解析領域のx方向の最大値
 #define MAX_Y  (0.2 + PCL_DST*3)	//解析領域のy方向の最大値
 #define MAX_Z  (0.6 + PCL_DST*30)	//解析領域のz方向の最大値
-
 #define GST -1			//計算対象外粒子の種類番号
 #define FLD 0				//流体粒子の種類番号
 #define WLL  1			//壁粒子の種類番号
@@ -45,7 +44,7 @@ int nBx,nBy,nBz,nBxy,nBxyz;
 int *bfst,*blst,*nxt;
 double n0,lmd,A1,A2,A3,rlim,rlim2,COL;
 double Dns[NUM_TYP],invDns[NUM_TYP];
-
+int count=0;
 void ChkPcl(int i){
 	if(	Pos[i*3  ]>MAX_X || Pos[i*3  ]<MIN_X ||
 		Pos[i*3+1]>MAX_Y || Pos[i*3+1]<MIN_Y ||
@@ -54,6 +53,7 @@ void ChkPcl(int i){
 		Typ[i] = GST;
 		Prs[i]=Vel[i*3]=Vel[i*3+1]=Vel[i*3+2]=0.0;
 		std::cout << "ChkPcl is success" << std::endl;
+		count++;
 	}
 }
 
@@ -137,9 +137,9 @@ void SetPara(void){
 	n0 = tn0;			//初期粒子数密度
 	lmd = tlmd/tn0;	//ラプラシアンモデルの係数λ
 	A1 = 2.0*KNM_VSC*DIM/n0/lmd;//粘性項の計算に用いる係数
-	std::cout << "A1= "<<A1<<std::endl;
 	A2 = SND*SND/n0;				//圧力の計算に用いる係数
 	A3 = -DIM/n0;					//圧力勾配項の計算に用いる係数
+	std::cout << "A1= "<<A1<<"A2="<<A2<<"A3="<<A3<<std::endl;
 	Dns[FLD]=DNS_FLD;
 	Dns[WLL]=DNS_WLL;
 	invDns[FLD]=1.0/DNS_FLD;
@@ -205,11 +205,6 @@ void VscTrm(){
 		Acc[i*3+1]=Acc_y*A1 + G_Y;
 		Acc[i*3+2]=Acc_z*A1 + G_Z;
 	}
-	/*if(Typ[i] == FLD){
-	std::cout << Acc[i*3] << std::endl;
-	std::cout << Acc[i*3+1] << std::endl;
-	std::cout << Acc[i*3+2] << std::endl;
-	}*/
 	}
 }
 
@@ -297,7 +292,6 @@ void MkPrs(){
 		double mi = Dns[Typ[i]];
 		double pressure = (ni > n0)*(ni - n0) * A2 * mi;
 		Prs[i] = pressure;
-		//std::cout<< "pressure[ "<< i << "]= " << Prs[i]<<std::endl;
 	}}
 }
 
@@ -354,7 +348,6 @@ void PrsGrdTrm(){
 		Acc[i*3  ]=Acc_x*invDns[FLD]*A3;
 		Acc[i*3+1]=Acc_y*invDns[FLD]*A3;
 		Acc[i*3+2]=Acc_z*invDns[FLD]*A3;
-		//std::cout << "Acc= " << Acc[i*3] << "|"<<Acc[i*3+1]<<"|"<<Acc[i*3+2] <<std::endl;
 	}}
 }
 
@@ -381,10 +374,10 @@ void ClcEMPS(void){
 			printf("%5d th TIM: %lf / p_num: %d\n", iLP,TIM,p_num);
 		}
 		if(iLP%OPT_FQC == 0 ){
+			std::cout<<"file made"<<std::endl;
 			WrtDat();
 			if(TIM >= FIN_TIM ){break;}
 		}
-		//fp = fopen("../../FDPS/sample/c++/emps/result/EMPS_result.csv","w");
 		MkBkt();
 		VscTrm();
 		UpPcl1();
@@ -393,10 +386,6 @@ void ClcEMPS(void){
 		PrsGrdTrm();
 		UpPcl2();
 		MkPrs();
-		/*for(int j = 0; j<nP; j++){
-			fprintf(fp, "%d,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf\n",Typ[j],Pos[j*3],Pos[j*3 +1],Pos[j*3 +2],Vel[j*3],Vel[j*3 +1],Vel[j*3 +2],Acc[j*3],Acc[j*3+1],Acc[j*3+2],Prs[j]);
-		}
-		fclose(fp);*/
 		for(int i=0;i<nP;i++){pav[i] += Prs[i];}
 		iLP++;
 		TIM += DT;
@@ -417,10 +406,14 @@ int main( int argc, char** argv) {
 	double timer_sta = get_dtime();
 
 	ClcEMPS();
-
+	std::cout<<"ChkPcl="<<count<<std::endl;
 	double timer_end = get_dtime();
 	printf("Total        : %13.6lf sec\n",timer_end -timer_sta);
-
+	fp = fopen("../../FDPS/sample/c++/emps/result/EMPS_result.csv","w");
+	for(int j=0;j<nP;j++){
+		fprintf(fp, "%d,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf,%lf\n",Typ[j],Pos[j*3],Pos[j*3 +1],Pos[j*3 +2],Vel[j*3],Vel[j*3 +1],Vel[j*3 +2],Acc[j*3],Acc[j*3+1],Acc[j*3+2],Prs[j]);
+	}
+	fclose(fp);
 
 	free(Acc);	free(Pos);	free(Vel);
 	free(Prs);	free(pav);	free(Typ);
