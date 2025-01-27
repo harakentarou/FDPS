@@ -19,7 +19,8 @@
 #define MAX_X (1.0 + PCL_DST * 3)
 #define MAX_Y (0.2 + PCL_DST * 3)
 #define MAX_Z (0.6 + PCL_DST * 30)
-#define END_TIM 1.0 //終了時刻
+//#define END_TIM 1.0 //終了時刻
+#define END_TIM 0.1 //終了時刻
 #define OPT_FQC 100 //出力間隔を決める反復数
 #define DIM 3
 const double Reff = PCL_DST * 2.1; //影響半径r = 初期粒子間距離の2.1倍
@@ -283,6 +284,8 @@ int main(int argc, char *argv[]){
 	fp = fopen(IN_FILE,"r");
 	fscanf(fp,"%d\n",&N);
 	emps.setNumberOfParticleLocal(N);
+	//acc_tree.initialize(N, 0.5, 4, 16);
+	//pres_tree.initialize(N, 0.5, 4, 16);
 	acc_tree.initialize(N);
 	pres_tree.initialize(N);
 	for(int i=0; i<N; i++){
@@ -302,11 +305,12 @@ int main(int argc, char *argv[]){
 	}
 	fclose(fp);
 	PS::F64 time = 0.0;
-	clock_t start = clock();
+	//clock_t start = clock();
+	auto start = PS::GetWtime();
 	while(1){
 		if(iLP%OPT_FQC == 0){
 			std::cout<<"file made"<<std::endl;
-			WrtDat(emps);
+			//WrtDat(emps);
 			if(time >= END_TIM)break;
 		}
 		dinfo.decomposeDomainAll(emps);
@@ -323,8 +327,10 @@ int main(int argc, char *argv[]){
 		iLP++;
 		time += FP::dt;
 	}
-	clock_t end = clock();
-	const double system_time = static_cast<double>(end-start)/CLOCKS_PER_SEC;
+	//clock_t end = clock();
+	auto end = PS::GetWtime();
+	//const double system_time = static_cast<double>(end-start)/CLOCKS_PER_SEC;
+	const auto system_time = end-start;
 	std::cout<<"Total		: "<< system_time <<" sec\n"<<std::endl;
 	fp = fopen("result/result.csv","w");
 	for(int i=0;i<N;i++){
