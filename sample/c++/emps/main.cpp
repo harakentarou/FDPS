@@ -19,8 +19,7 @@
 #define MAX_X (1.0 + PCL_DST * 3)
 #define MAX_Y (0.2 + PCL_DST * 3)
 #define MAX_Z (0.6 + PCL_DST * 30)
-//#define END_TIM 1.0 //終了時刻
-#define END_TIM 0.1 //終了時刻
+#define END_TIM 1.0 //終了時刻
 #define OPT_FQC 100 //出力間隔を決める反復数
 #define DIM 3
 const double Reff = PCL_DST * 2.1; //影響半径r = 初期粒子間距離の2.1倍
@@ -30,7 +29,7 @@ const double rlim = PCL_DST * DST_LMT_RAT; //初期粒子間距離の0.9倍
 const double rlim2 = rlim * rlim;
 const double COL = 1.0 + COL_RAT; //接近した粒子に対する反発係数+1.0
 double N0, LMD, A1, A2, A3;
-int N;//particle_num
+int N;
 int iF,iLP;//ファイル番号,反復数
 int count=0;
 FILE*fp;
@@ -164,7 +163,7 @@ struct CalcAcc{
         			const double w = calc_weight(dist);
 					acc[i].acc += (ep_j[j].vel - ep_i[i].vel)*w;
 				}
-	    	}//forループ抜け
+	    	}
         	acc[i].acc = acc[i].acc * A1;
         	acc[i].acc.z = acc[i].acc.z + FP::grav;
         	}
@@ -177,6 +176,7 @@ void ChkPcl(Tpi & pi){
 		pi.Typ = GST;
 		pi.pres = 0.0;
 		pi.vel = 0.0;
+		std::cout<<"success"<<std::endl;
 	}
 }
 template<typename Tptcl>
@@ -204,7 +204,7 @@ struct Mkprs{
 				for(PS::S32 j = 0; j < Njp; ++j){
 					const PS::F64vec dr = ep_j[j].pos - ep_i[i].pos;
 					const double dist2 = dr * dr;
-					if(dist2 == 0.0 || dist2 > Reff2)continue;
+					if(dist2 == 0.0 || dist2 >= Reff2)continue;
 					const double dist = sqrt(dist2);
 					const double w = calc_weight(dist);
 					ni += w;
@@ -305,32 +305,35 @@ int main(int argc, char *argv[]){
 	}
 	fclose(fp);
 	PS::F64 time = 0.0;
-	//clock_t start = clock();
 	auto start = PS::GetWtime();
+	auto end = PS::GetWtime();
+	auto system_time = 0.0;
 	while(1){
 		if(iLP%OPT_FQC == 0){
-			std::cout<<"file made"<<std::endl;
-			//WrtDat(emps);
+			WrtDat(emps);
 			if(time >= END_TIM)break;
 		}
+		start = PS::GetWtime();
 		dinfo.decomposeDomainAll(emps);
 		emps.exchangeParticle(dinfo);
+
+		
 		acc_tree.calcForceAllAndWriteBack(CalcAcc(), emps, dinfo);
 		first_UpPtcl(emps);
 		pres_tree.calcForceAllAndWriteBack(Mkprs(), emps, dinfo);
 		acc_tree.calcForceAllAndWriteBack(PrsGrdTrm(), emps, dinfo);
 		second_UpPtcl(emps);
 		pres_tree.calcForceAllAndWriteBack(Mkprs(), emps, dinfo);
+
+		
 		for(int i=0;i<N;i++){
 			emps[i].pav += emps[i].pres;
 		}
 		iLP++;
 		time += FP::dt;
+		end = PS::GetWtime();
+		system_time += (end - start);
 	}
-	//clock_t end = clock();
-	auto end = PS::GetWtime();
-	//const double system_time = static_cast<double>(end-start)/CLOCKS_PER_SEC;
-	const auto system_time = end-start;
 	std::cout<<"Total		: "<< system_time <<" sec\n"<<std::endl;
 	fp = fopen("result/result.csv","w");
 	for(int i=0;i<N;i++){
