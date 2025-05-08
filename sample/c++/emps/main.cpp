@@ -19,18 +19,19 @@
 #define MAX_X (1.0 + PCL_DST * 3)
 #define MAX_Y (0.2 + PCL_DST * 3)
 #define MAX_Z (0.6 + PCL_DST * 30)
-#define END_TIM 1.0 //終了時刻
+//#define END_TIM 1.0 //終了時刻
+#define END_TIM 0.1 //終了時刻
 #define OPT_FQC 100 //出力間隔を決める反復数
 #define DIM 3
-const double Reff = PCL_DST * 2.1; //影響半径r = 初期粒子間距離の2.1倍
+const double Reff = PCL_DST * 2.1; //影響半径r
 const double Reff2 = Reff*Reff;
 const double KNM_VSC = 0.000001;
-const double rlim = PCL_DST * DST_LMT_RAT; //初期粒子間距離の0.9倍
+const double rlim = PCL_DST * DST_LMT_RAT;
 const double rlim2 = rlim * rlim;
-const double COL = 1.0 + COL_RAT; //接近した粒子に対する反発係数+1.0
+const double COL = 1.0 + COL_RAT;
 double N0, LMD, A1, A2, A3;
 int N;
-int iF,iLP;//ファイル番号,反復数
+int iF,iLP;
 int count=0;
 FILE*fp;
 double Dns[2],invDns[2];
@@ -93,15 +94,17 @@ class Pressure{
 	PS::F64vec vel;
 	void clear(){
 		pres = 0.0;
+		acc = 0.0;
+		vel = 0.0;
 	}
 };
-// Full Particle Class
+
 struct FP{
 	PS::F64vec pos;
     PS::F64vec vel;
     PS::F64vec acc;
     PS::F64 pres;
-    PS::F64 pav;//時間平均された粒子の圧力
+    PS::F64 pav;
     PS::F64 dens;
     PS::S32 Typ;
     inline static PS::F64 grav = -9.8;
@@ -176,7 +179,6 @@ void ChkPcl(Tpi & pi){
 		pi.Typ = GST;
 		pi.pres = 0.0;
 		pi.vel = 0.0;
-		std::cout<<"success"<<std::endl;
 	}
 }
 template<typename Tptcl>
@@ -284,10 +286,8 @@ int main(int argc, char *argv[]){
 	fp = fopen(IN_FILE,"r");
 	fscanf(fp,"%d\n",&N);
 	emps.setNumberOfParticleLocal(N);
-	//acc_tree.initialize(N, 0.5, 4, 16);
-	//pres_tree.initialize(N, 0.5, 4, 16);
-	acc_tree.initialize(N);
-	pres_tree.initialize(N);
+	acc_tree.initialize(N, 0.0, 8, 128);
+	pres_tree.initialize(N, 0.0, 8, 128);
 	for(int i=0; i<N; i++){
         int a[2];
  		double b[8];
@@ -314,18 +314,22 @@ int main(int argc, char *argv[]){
 			if(time >= END_TIM)break;
 		}
 		start = PS::GetWtime();
+		//auto list_mode = PS::REUSE_LIST;
+		//if(iLP%10 == 0) list_mode = PS::MAKE_LIST_FOR_REUSE;
+		auto list_mode = PS::MAKE_LIST;
+		//std::cout<<"iLP= "<<iLP<<" list_mode= "<<list_mode<<std::endl;
 		dinfo.decomposeDomainAll(emps);
 		emps.exchangeParticle(dinfo);
-
-		
-		acc_tree.calcForceAllAndWriteBack(CalcAcc(), emps, dinfo);
+		//acc_tree.calcForceAllAndWriteBack(CalcAcc(), emps, dinfo);
+		acc_tree.calcForceAllAndWriteBack(CalcAcc(), emps, dinfo, list_mode);
 		first_UpPtcl(emps);
-		pres_tree.calcForceAllAndWriteBack(Mkprs(), emps, dinfo);
-		acc_tree.calcForceAllAndWriteBack(PrsGrdTrm(), emps, dinfo);
+		//pres_tree.calcForceAllAndWriteBack(Mkprs(), emps, dinfo);
+		pres_tree.calcForceAllAndWriteBack(Mkprs(), emps, dinfo, list_mode);
+		//acc_tree.calcForceAllAndWriteBack(PrsGrdTrm(), emps, dinfo);
+		acc_tree.calcForceAllAndWriteBack(PrsGrdTrm(), emps, dinfo, list_mode);
 		second_UpPtcl(emps);
-		pres_tree.calcForceAllAndWriteBack(Mkprs(), emps, dinfo);
-
-		
+		//pres_tree.calcForceAllAndWriteBack(Mkprs(), emps, dinfo);
+		pres_tree.calcForceAllAndWriteBack(Mkprs(), emps, dinfo, list_mode);
 		for(int i=0;i<N;i++){
 			emps[i].pav += emps[i].pres;
 		}
